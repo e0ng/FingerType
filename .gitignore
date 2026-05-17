@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local datasets and training artifacts
+American Sign Language Letters/
+runs/
+
+# Local model weights
+*.pt
+!models/.gitkeep
+
+# Streamlit and notebook/runtime leftovers
+.streamlit/
+.ipynb_checkpoints/
