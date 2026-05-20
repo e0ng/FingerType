@@ -18,10 +18,15 @@ class SignRecognizer:
         self.model = YOLO(str(model_file))
         self.conf_threshold = conf_threshold
 
-    def predict(self, frame: np.ndarray) -> tuple[np.ndarray, str | None, float]:
+    def predict(
+        self,
+        frame: np.ndarray,
+        draw_labels: bool = True,
+        draw_conf: bool = True,
+    ) -> tuple[np.ndarray, str | None, float]:
         results = self.model.predict(frame, verbose=False, conf=self.conf_threshold)
         result = results[0]
-        annotated = result.plot()
+        annotated = result.plot(labels=draw_labels, conf=draw_conf)
 
         if hasattr(result, "probs") and result.probs is not None:
             label_index = int(result.probs.top1)

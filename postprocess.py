@@ -45,3 +45,13 @@ class DebounceAccumulator:
         self.stable_frames = 0
         self.cooldown = 0
         self.text = ""
+
+    def append_space(self) -> None:
+        self.text += " "
+        self.current_label = None
+        self.stable_frames = 0
+
+    def backspace(self) -> None:
+        self.text = self.text[:-1]
+        self.current_label = None
+        self.stable_frames = 0
