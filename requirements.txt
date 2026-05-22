@@ -4,3 +4,4 @@ streamlit-shortcuts>=1.2.1
 opencv-python>=4.10.0
 ultralytics>=8.3.0
 numpy>=1.26.0
+mediapipe>=0.10.0
