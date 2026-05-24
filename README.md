@@ -26,10 +26,18 @@ This is a minimal starter for real-time ASL finger spelling recognition.
 pip install -r requirements.txt
 ```
 
-2. Put your trained model at:
+2. Download the trained model separately and put it at:
 
 ```text
-models/asl_yolov8n.pt
+models/asl5_yolov8n.pt
+```
+
+For `J` and `Z` dynamic gesture tracking, also download the MediaPipe hand
+landmarker model:
+
+```bash
+curl -L -o models/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
 ```
 
 3. Run the app:
