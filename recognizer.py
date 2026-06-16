@@ -67,10 +67,18 @@ def _is_index_extended(landmarks) -> bool:
     tip = landmarks[8]   # INDEX_FINGER_TIP
     pip = landmarks[6]   # INDEX_FINGER_PIP (중간 마디)
     mcp = landmarks[5]   # INDEX_FINGER_MCP (손가락 밑 관절)
-    # 검지가 펴진 경우: 끝이 중간 마디보다 손바닥에서 더 멀리 있음
     tip_dist = ((tip.x - mcp.x) ** 2 + (tip.y - mcp.y) ** 2) ** 0.5
     pip_dist = ((pip.x - mcp.x) ** 2 + (pip.y - mcp.y) ** 2) ** 0.5
     return tip_dist > pip_dist * 1.2
+
+
+def _is_ring_extended(landmarks) -> bool:
+    tip = landmarks[16]  # RING_FINGER_TIP
+    pip = landmarks[14]  # RING_FINGER_PIP (중간 마디)
+    mcp = landmarks[13]  # RING_FINGER_MCP (손가락 밑 관절)
+    tip_dist = ((tip.x - mcp.x) ** 2 + (tip.y - mcp.y) ** 2) ** 0.5
+    pip_dist = ((pip.x - mcp.x) ** 2 + (pip.y - mcp.y) ** 2) ** 0.5
+    return tip_dist > pip_dist * 1.1
 
 
 class SignRecognizer:
@@ -135,7 +143,12 @@ class SignRecognizer:
             if detection.hand_landmarks:
                 lms = detection.hand_landmarks[0]
                 if _is_index_extended(lms):
-                    tip = lms[_INDEX_TIP]
+                    # Z: 검지로 그림
+                    tip = lms[8]
+                    self.track_points.append((int(tip.x * w), int(tip.y * h)))
+                elif _is_ring_extended(lms):
+                    # J: 약지로 그림
+                    tip = lms[16]
                     self.track_points.append((int(tip.x * w), int(tip.y * h)))
                 else:
                     self.track_points.clear()
