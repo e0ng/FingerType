@@ -17,6 +17,16 @@ class DebounceAccumulator:
         self.cooldown = 0
         self.text = ""
 
+    def force_commit(self, label: str) -> CommitResult:
+        """J/Z처럼 동적 제스처는 감지 즉시 확정."""
+        if self.cooldown > 0:
+            return CommitResult(False, self.text, label)
+        self.text += label
+        self.cooldown = self.cooldown_frames
+        self.current_label = None
+        self.stable_frames = 0
+        return CommitResult(True, self.text, label)
+
     def update(self, label: str | None) -> CommitResult:
         if self.cooldown > 0:
             self.cooldown -= 1
