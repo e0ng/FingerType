@@ -13,7 +13,7 @@ from postprocess import DebounceAccumulator
 from recognizer import SignRecognizer
 
 
-DEFAULT_MODEL_PATH = "models/asl5_yolov8n.pt"
+DEFAULT_MODEL_PATH = "models/asl6_yolov8n.pt"
 
 
 @dataclass
