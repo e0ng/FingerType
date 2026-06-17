@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import tempfile
 from threading import Lock
 
 import av
@@ -25,6 +26,43 @@ class RuntimeConfig:
     cooldown_frames: int
 
 
+def run_recognition_step(
+    image,
+    recognizer: SignRecognizer,
+    gesture_recognizer: GestureRecognizer,
+    accumulator: DebounceAccumulator,
+) -> tuple[object, str | None, float, str, str | None, float, str]:
+    annotated, gesture, gesture_score = gesture_recognizer.predict(image)
+    state = gesture_recognizer.current_state
+
+    if state == "DETECTING":
+        yolo_annotated, label, score = recognizer.predict(
+            annotated,
+            draw_labels=True,
+            draw_conf=False,
+        )
+        annotated = yolo_annotated
+        commit = accumulator.update(label)
+    else:
+        label, score = None, 0.0
+        if gesture is not None:
+            commit = accumulator.force_commit(gesture)
+        else:
+            commit = accumulator.update(None)
+
+    display_label = gesture if gesture else label
+    display_score = gesture_score if gesture else score
+    return (
+        annotated,
+        display_label,
+        display_score,
+        commit.text,
+        gesture,
+        gesture_score,
+        state,
+    )
+
+
 class VideoProcessor:
     def __init__(self, config: RuntimeConfig):
         self.config = config
@@ -47,28 +85,25 @@ class VideoProcessor:
         image = frame.to_ndarray(format="bgr24")
         image = cv2.flip(image, 1)
 
-        annotated, gesture, gesture_score = self.gesture_recognizer.predict(image)
-        state = self.gesture_recognizer.current_state
-
-        if state == "DETECTING":
-            # YOLO로 A~Y 인식
-            yolo_annotated, label, score = self.recognizer.predict(
-                annotated, draw_labels=True, draw_conf=False,
-            )
-            annotated = yolo_annotated
-            commit = self.accumulator.update(label)
-        else:
-            # MOVING/JUDGING/COOLDOWN: YOLO 끄고 gesture 결과만
-            label, score = None, 0.0
-            if gesture is not None:
-                commit = self.accumulator.force_commit(gesture)
-            else:
-                commit = self.accumulator.update(None)
+        (
+            annotated,
+            label,
+            score,
+            output_text,
+            gesture,
+            gesture_score,
+            state,
+        ) = run_recognition_step(
+            image,
+            self.recognizer,
+            self.gesture_recognizer,
+            self.accumulator,
+        )
 
         with self.lock:
-            self.last_label  = gesture if gesture else label
-            self.last_score  = gesture_score if gesture else score
-            self.last_text   = commit.text
+            self.last_label  = label
+            self.last_score  = score
+            self.last_text   = output_text
             self.last_gesture = gesture
             self.last_gesture_score = gesture_score
             self.last_state  = state
@@ -122,6 +157,152 @@ def render_output_box(placeholder, text: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_uploaded_video_tool(config: RuntimeConfig) -> None:
+    st.divider()
+    st.subheader("동영상 업로드 인식")
+
+    uploaded_file = st.file_uploader(
+        "인식할 동영상 파일",
+        type=["mp4", "mov", "avi", "mkv"],
+    )
+    option_col1, option_col2 = st.columns(2)
+    with option_col1:
+        frame_stride = st.slider(
+            "분석 프레임 간격",
+            1,
+            10,
+            2,
+            help="값이 클수록 빠르게 처리하지만 짧은 동작을 놓칠 수 있습니다.",
+        )
+    with option_col2:
+        mirror_video = st.checkbox(
+            "좌우 반전",
+            value=True,
+            help="웹캠 화면과 같은 방향으로 맞춰 분석합니다.",
+        )
+
+    if uploaded_file is None:
+        return
+
+    st.video(uploaded_file)
+    if not st.button("업로드 영상 인식 시작", use_container_width=True):
+        return
+
+    recognizer = SignRecognizer(
+        model_path=config.model_path,
+        conf_threshold=config.conf_threshold,
+    )
+    gesture_recognizer = GestureRecognizer()
+    accumulator = DebounceAccumulator(
+        min_stable_frames=config.stable_frames,
+        cooldown_frames=config.cooldown_frames,
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as input_file:
+        input_file.write(uploaded_file.getbuffer())
+        input_path = input_file.name
+
+    output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    output_path = output_file.name
+    output_file.close()
+
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        st.error("동영상 파일을 열 수 없습니다.")
+        return
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    writer = cv2.VideoWriter(
+        output_path,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps / frame_stride if frame_stride > 1 else fps,
+        (width, height),
+    )
+
+    progress = st.progress(0, text="동영상 인식 준비 중")
+    preview_placeholder = st.empty()
+    result_placeholder = st.empty()
+    last_label: str | None = None
+    last_score = 0.0
+    last_state = "DETECTING"
+    last_gesture: str | None = None
+    last_gesture_score = 0.0
+    output_text = ""
+    processed_frames = 0
+    frame_index = 0
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        if frame_index % frame_stride != 0:
+            frame_index += 1
+            continue
+
+        if mirror_video:
+            frame = cv2.flip(frame, 1)
+
+        (
+            annotated,
+            last_label,
+            last_score,
+            output_text,
+            last_gesture,
+            last_gesture_score,
+            last_state,
+        ) = run_recognition_step(
+            frame,
+            recognizer,
+            gesture_recognizer,
+            accumulator,
+        )
+        writer.write(annotated)
+        processed_frames += 1
+
+        if processed_frames % 10 == 0:
+            preview_placeholder.image(
+                cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+                channels="RGB",
+                caption="처리 중인 프레임",
+            )
+
+        if total_frames:
+            progress.progress(
+                min(frame_index / total_frames, 1.0),
+                text=f"동영상 인식 중: {frame_index}/{total_frames} frames",
+            )
+        else:
+            progress.progress(0, text=f"동영상 인식 중: {processed_frames} frames")
+
+        frame_index += 1
+
+    cap.release()
+    writer.release()
+    progress.progress(1.0, text="동영상 인식 완료")
+
+    result_placeholder.markdown(
+        f"""
+        **최종 인식 글자:** `{last_label if last_label else "-"}`
+
+        **신뢰도:** `{last_score:.2f}`
+
+        **J/Z 상태:** `{last_state}`
+
+        **J/Z 인식:** `{last_gesture if last_gesture else "-"}`
+
+        **J/Z 신뢰도:** `{last_gesture_score:.2f}`
+        """
+    )
+    render_output_box(st.empty(), output_text)
+
+    with open(output_path, "rb") as video_file:
+        st.video(video_file.read())
 
 
 def build_config() -> RuntimeConfig:
@@ -232,6 +413,7 @@ def main() -> None:
             render_output_box(text_box_placeholder, "")
 
     render_live_status()
+    render_uploaded_video_tool(config)
 
 if __name__ == "__main__":
     main()
