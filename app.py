@@ -11,6 +11,7 @@ from streamlit_webrtc import WebRtcMode, webrtc_streamer
 
 from postprocess import DebounceAccumulator
 from recognizer import SignRecognizer
+from gesture_recognizer import GestureRecognizer
 
 
 DEFAULT_MODEL_PATH = "models/asl6_yolov8n.pt"
@@ -32,28 +33,45 @@ class VideoProcessor:
             model_path=config.model_path,
             conf_threshold=config.conf_threshold,
         )
+        self.gesture_recognizer = GestureRecognizer()
         self.accumulator = DebounceAccumulator(
             min_stable_frames=config.stable_frames,
             cooldown_frames=config.cooldown_frames,
         )
         self.last_label: str | None = None
         self.last_score: float = 0.0
+        self.last_gesture: str | None = None
+        self.last_gesture_score: float = 0.0
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         image = frame.to_ndarray(format="bgr24")
         image = cv2.flip(image, 1)
 
-        annotated, label, score = self.recognizer.predict(
-            image,
-            draw_labels=True,
-            draw_conf=False,
-        )
-        commit = self.accumulator.update(label)
+        annotated, gesture, gesture_score = self.gesture_recognizer.predict(image)
+        state = self.gesture_recognizer.current_state
+
+        if state == "DETECTING":
+            # YOLO로 A~Y 인식
+            yolo_annotated, label, score = self.recognizer.predict(
+                annotated, draw_labels=True, draw_conf=False,
+            )
+            annotated = yolo_annotated
+            commit = self.accumulator.update(label)
+        else:
+            # MOVING/JUDGING/COOLDOWN: YOLO 끄고 gesture 결과만
+            label, score = None, 0.0
+            if gesture is not None:
+                commit = self.accumulator.force_commit(gesture)
+            else:
+                commit = self.accumulator.update(None)
 
         with self.lock:
-            self.last_label = label
-            self.last_score = score
-            self.last_text = commit.text
+            self.last_label  = gesture if gesture else label
+            self.last_score  = gesture_score if gesture else score
+            self.last_text   = commit.text
+            self.last_gesture = gesture
+            self.last_gesture_score = gesture_score
+            self.last_state  = state
 
         return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
@@ -74,9 +92,16 @@ class VideoProcessor:
             self.accumulator.backspace()
             self.last_text = self.accumulator.text
 
-    def get_state(self) -> tuple[str | None, float, str]:
+    def get_state(self) -> tuple[str | None, float, str, str | None, float, str]:
         with self.lock:
-            return self.last_label, self.last_score, getattr(self, "last_text", "")
+            return (
+                self.last_label,
+                self.last_score,
+                getattr(self, "last_text", ""),
+                self.last_gesture,
+                self.last_gesture_score,
+                getattr(self, "last_state", "DETECTING"),
+            )
 
 def render_output_box(placeholder, text: str) -> None:
     safe_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -135,6 +160,11 @@ def main() -> None:
         "4. 인식 결과는 오른쪽 패널, 누적 텍스트는 카메라 아래에 표시됩니다."
     )
 
+    # J/Z 인식 결과 상단 표시
+    jz_col1, jz_col2 = st.columns(2)
+    jz_label_ph = jz_col1.empty()
+    jz_conf_ph  = jz_col2.empty()
+
     camera_col, info_col = st.columns([3, 2])
     with camera_col:
         ctx = webrtc_streamer(
@@ -178,7 +208,14 @@ def main() -> None:
     @st.fragment(run_every=0.2)
     def render_live_status() -> None:
         if ctx.state.playing and ctx.video_processor:
-            label, score, output_text = ctx.video_processor.get_state()
+            label, score, output_text, gesture, gesture_score, state = ctx.video_processor.get_state()
+            # 상태 표시
+            state_color = {"DETECTING": "🟢", "MOVING": "🟡", "JUDGING": "🔵", "COOLDOWN": "🔴"}
+            jz_label_ph.metric("J/Z 인식", gesture if gesture else "-")
+            jz_conf_ph.progress(
+                int(gesture_score * 100),
+                text=f"상태: {state_color.get(state,'')} {state}",
+            )
             camera_status_placeholder.success("인식 중")
             camera_letter_placeholder.metric("현재 인식 글자", label if label else "-")
             camera_conf_placeholder.progress(
@@ -187,6 +224,8 @@ def main() -> None:
             )
             render_output_box(text_box_placeholder, output_text)
         else:
+            jz_label_ph.metric("J/Z 인식", "-")
+            jz_conf_ph.progress(0, text="상태: -")
             camera_status_placeholder.info("카메라 시작 대기 중")
             camera_letter_placeholder.metric("현재 인식 글자", "-")
             camera_conf_placeholder.progress(0, text="신뢰도: -")
