@@ -14,7 +14,7 @@ from recognizer import SignRecognizer
 from gesture_recognizer import GestureRecognizer
 
 
-DEFAULT_MODEL_PATH = "models/asl5_yolov8n.pt"
+DEFAULT_MODEL_PATH = "models/asl6_yolov8n.pt"
 
 
 @dataclass
