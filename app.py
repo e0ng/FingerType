@@ -24,6 +24,8 @@ class RuntimeConfig:
     conf_threshold: float
     stable_frames: int
     cooldown_frames: int
+    finger_ready_frames: int
+    speed_enter: int
 
 
 def run_recognition_step(
@@ -73,7 +75,10 @@ class VideoProcessor:
             model_path=config.model_path,
             conf_threshold=config.conf_threshold,
         )
-        self.gesture_recognizer = GestureRecognizer()
+        self.gesture_recognizer = GestureRecognizer(
+            finger_ready_frames=config.finger_ready_frames,
+            speed_enter=config.speed_enter,
+        )
         self.accumulator = DebounceAccumulator(
             min_stable_frames=config.stable_frames,
             cooldown_frames=config.cooldown_frames,
@@ -314,12 +319,16 @@ def build_config() -> RuntimeConfig:
         conf_threshold = st.slider("신뢰도 임계값", 0.1, 0.95, 0.5, 0.05)
         stable_frames = st.slider("글자 확정 프레임 수", 1, 20, 8)
         cooldown_frames = st.slider("중복 입력 방지 프레임 수", 0, 30, 10)
+        finger_ready_frames = st.slider("동적 인식 진입 프레임 수 (J/Z)", 1, 15, 4)
+        speed_enter = st.slider("동적 인식 진입 속도 (px/frame)", 1, 30, 10)
 
     return RuntimeConfig(
         model_path=model_path,
         conf_threshold=conf_threshold,
         stable_frames=stable_frames,
         cooldown_frames=cooldown_frames,
+        finger_ready_frames=finger_ready_frames,
+        speed_enter=speed_enter,
     )
 
 
