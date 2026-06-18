@@ -51,11 +51,13 @@ class VideoProcessor:
         state = self.gesture_recognizer.current_state
 
         if state == "DETECTING":
-            # YOLO로 A~Y 인식
+            # YOLO로 A~Y 인식 (J/Z는 동적 인식으로만, 검지/새끼 펴진 상태면 억제)
             yolo_annotated, label, score = self.recognizer.predict(
                 annotated, draw_labels=True, draw_conf=False,
             )
             annotated = yolo_annotated
+            if label in ("J", "Z"):
+                label, score = None, 0.0
             commit = self.accumulator.update(label)
         else:
             # MOVING/JUDGING/COOLDOWN: YOLO 끄고 gesture 결과만
