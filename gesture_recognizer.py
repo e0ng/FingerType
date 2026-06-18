@@ -117,6 +117,7 @@ class GestureRecognizer:
         scaler_path: str = _DEFAULT_SCALER,
         landmarker_path: str = _DEFAULT_LANDMARKER,
         conf_threshold: float = 0.6,
+        finger_ready_frames: int = 4,
     ):
         self.conf_threshold = conf_threshold
         self.state          = State.DETECTING
@@ -126,8 +127,8 @@ class GestureRecognizer:
         self._stop_cnt      = 0
         self._move_start    = 0.0
         self._cool_start    = 0.0
-        self._finger_ready_cnt = 0   # 손가락 펴진 상태 유지 프레임 수
-        self._FINGER_READY  = 4      # 이 프레임 수 이상 유지돼야 궤적 수집 시작
+        self._finger_ready_cnt = 0          # 손가락 펴진 상태 유지 프레임 수
+        self._FINGER_READY  = finger_ready_frames  # 이 프레임 수 이상 유지돼야 MOVING 진입
         self._last_fstate   = None   # 직전 비-None fstate 기억
         self._model         = None
         self._scaler        = None
