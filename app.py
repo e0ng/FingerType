@@ -24,6 +24,7 @@ class RuntimeConfig:
     stable_frames: int
     cooldown_frames: int
     finger_ready_frames: int
+    speed_enter: int
 
 
 class VideoProcessor:
@@ -36,6 +37,7 @@ class VideoProcessor:
         )
         self.gesture_recognizer = GestureRecognizer(
             finger_ready_frames=config.finger_ready_frames,
+            speed_enter=config.speed_enter,
         )
         self.accumulator = DebounceAccumulator(
             min_stable_frames=config.stable_frames,
@@ -137,6 +139,7 @@ def build_config() -> RuntimeConfig:
         stable_frames = st.slider("글자 확정 프레임 수", 1, 20, 8)
         cooldown_frames = st.slider("중복 입력 방지 프레임 수", 0, 30, 10)
         finger_ready_frames = st.slider("동적 인식 진입 프레임 수 (J/Z)", 1, 15, 4)
+        speed_enter = st.slider("동적 인식 진입 속도 (px/frame)", 1, 30, 10)
 
     return RuntimeConfig(
         model_path=model_path,
@@ -144,6 +147,7 @@ def build_config() -> RuntimeConfig:
         stable_frames=stable_frames,
         cooldown_frames=cooldown_frames,
         finger_ready_frames=finger_ready_frames,
+        speed_enter=speed_enter,
     )
 
 

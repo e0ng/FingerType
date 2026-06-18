@@ -118,6 +118,7 @@ class GestureRecognizer:
         landmarker_path: str = _DEFAULT_LANDMARKER,
         conf_threshold: float = 0.6,
         finger_ready_frames: int = 4,
+        speed_enter: int = 10,
     ):
         self.conf_threshold = conf_threshold
         self.state          = State.DETECTING
@@ -127,8 +128,9 @@ class GestureRecognizer:
         self._stop_cnt      = 0
         self._move_start    = 0.0
         self._cool_start    = 0.0
-        self._finger_ready_cnt = 0          # 손가락 펴진 상태 유지 프레임 수
-        self._FINGER_READY  = finger_ready_frames  # 이 프레임 수 이상 유지돼야 MOVING 진입
+        self._finger_ready_cnt = 0
+        self._FINGER_READY  = finger_ready_frames
+        self._SPEED_ENTER   = speed_enter
         self._last_fstate   = None   # 직전 비-None fstate 기억
         self._model         = None
         self._scaler        = None
@@ -201,15 +203,19 @@ class GestureRecognizer:
 
             if self.state == State.DETECTING:
                 if fstate is not None:
-                    self._finger_ready_cnt += 1
+                    if spd < self._SPEED_ENTER:
+                        # 안정적으로 펴진 상태일 때만 카운트
+                        self._finger_ready_cnt += 1
+                    # 빠르게 움직이는 중엔 카운트 유지 (리셋 안 함)
                 else:
+                    # 손가락 사라지면 리셋
                     self._finger_ready_cnt = 0
 
                 # 손가락 펴진 상태가 충분히 유지된 후 움직임 감지 시 MOVING 진입
                 if (fstate is not None
                         and self._prev is not None
                         and self._finger_ready_cnt >= self._FINGER_READY
-                        and spd >= _SPEED_ENTER):
+                        and spd >= self._SPEED_ENTER):
                     self._mode       = fstate
                     self._stop_cnt   = 0
                     self._move_start = now
@@ -252,6 +258,12 @@ class GestureRecognizer:
     def _judge(self):
         pts = list(self.track)
         if len(pts) < 15:
+            return None, 0.0
+
+        # 최소 이동폭 체크 — 너무 작은 움직임은 제스처로 인정 안 함
+        arr = np.array(pts)
+        span = (arr.max(axis=0) - arr.min(axis=0)).max()
+        if span < 60:
             return None, 0.0
 
         # 규칙 기반 먼저
