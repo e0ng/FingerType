@@ -166,10 +166,129 @@ def render_output_box(placeholder, text: str) -> None:
     )
 
 
-def render_uploaded_video_tool(config: RuntimeConfig) -> None:
-    st.divider()
-    st.subheader("동영상 업로드 인식")
+def render_status_panel(
+    label_placeholder,
+    score_placeholder,
+    jz_label_placeholder,
+    jz_state_placeholder,
+    text_placeholder,
+    label: str | None,
+    score: float,
+    output_text: str,
+    gesture: str | None,
+    gesture_score: float,
+    state: str,
+) -> None:
+    state_color = {
+        "DETECTING": "🟢",
+        "MOVING": "🟡",
+        "JUDGING": "🔵",
+        "COOLDOWN": "🔴",
+    }
+    jz_label_placeholder.metric("J/Z 인식", gesture if gesture else "-")
+    jz_state_placeholder.progress(
+        int(max(0.0, min(gesture_score, 1.0)) * 100),
+        text=f"상태: {state_color.get(state, '')} {state}",
+    )
+    label_placeholder.metric("현재 인식 글자", label if label else "-")
+    score_placeholder.progress(
+        int(max(0.0, min(score, 1.0)) * 100),
+        text=f"신뢰도: {score:.2f}" if label else "신뢰도: -",
+    )
+    render_output_box(text_placeholder, output_text)
 
+
+def render_live_recognition_tab(config: RuntimeConfig) -> None:
+    st.info(
+        "1. 아래 `START`를 눌러 카메라를 시작하세요.\n"
+        "2. 카메라 권한을 허용하세요.\n"
+        "3. 손동작을 웹캠 앞에 보여주세요.\n"
+        "4. 인식 결과는 오른쪽 패널, 누적 텍스트는 카메라 아래에 표시됩니다."
+    )
+
+    camera_col, info_col = st.columns([3, 2])
+    with camera_col:
+        ctx = webrtc_streamer(
+            key="asl-recognizer",
+            mode=WebRtcMode.SENDRECV,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+            video_processor_factory=lambda: VideoProcessor(config),
+        )
+        camera_status_placeholder = st.empty()
+
+    with info_col:
+        st.subheader("인식 상태")
+        jz_label_placeholder = st.empty()
+        jz_state_placeholder = st.empty()
+        letter_placeholder = st.empty()
+        conf_placeholder = st.empty()
+        st.subheader("누적 텍스트")
+        text_placeholder = st.empty()
+        reset_clicked = st.button("전체 초기화", use_container_width=True)
+        space_clicked = shortcut_button(
+            "띄어쓰기",
+            "space",
+            key="space_button",
+            use_container_width=True,
+        )
+        delete_clicked = shortcut_button(
+            "한 글자 지우기",
+            "backspace",
+            key="delete_button",
+            use_container_width=True,
+        )
+        st.caption("설정을 바꿨다면 STOP 후 다시 START 하세요.")
+        st.caption("단축키: Space = 띄어쓰기, Backspace = 한 글자 지우기")
+
+    if reset_clicked and ctx.video_processor:
+        ctx.video_processor.reset_text()
+        st.success("출력 텍스트를 초기화했습니다.")
+    if space_clicked and ctx.video_processor:
+        ctx.video_processor.append_space()
+    if delete_clicked and ctx.video_processor:
+        ctx.video_processor.backspace()
+
+    @st.fragment(run_every=0.2)
+    def render_live_status() -> None:
+        if ctx.state.playing and ctx.video_processor:
+            label, score, output_text, gesture, gesture_score, state = (
+                ctx.video_processor.get_state()
+            )
+            camera_status_placeholder.success("인식 중")
+            render_status_panel(
+                letter_placeholder,
+                conf_placeholder,
+                jz_label_placeholder,
+                jz_state_placeholder,
+                text_placeholder,
+                label,
+                score,
+                output_text,
+                gesture,
+                gesture_score,
+                state,
+            )
+        else:
+            camera_status_placeholder.info("카메라 시작 대기 중")
+            render_status_panel(
+                letter_placeholder,
+                conf_placeholder,
+                jz_label_placeholder,
+                jz_state_placeholder,
+                text_placeholder,
+                None,
+                0.0,
+                "",
+                None,
+                0.0,
+                "-",
+            )
+
+    render_live_status()
+
+
+def render_uploaded_video_tool(config: RuntimeConfig) -> None:
     uploaded_file = st.file_uploader(
         "인식할 동영상 파일",
         type=["mp4", "mov", "avi", "mkv"],
@@ -193,8 +312,38 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
     if uploaded_file is None:
         return
 
-    st.video(uploaded_file)
-    if not st.button("업로드 영상 인식 시작", use_container_width=True):
+    video_col, info_col = st.columns([3, 2])
+    with video_col:
+        video_placeholder = st.empty()
+        video_placeholder.video(uploaded_file)
+        start_clicked = st.button("업로드 영상 인식 시작", use_container_width=True)
+        progress = st.progress(0, text="동영상 인식 대기 중")
+        preview_placeholder = st.empty()
+
+    with info_col:
+        st.subheader("인식 상태")
+        jz_label_placeholder = st.empty()
+        jz_state_placeholder = st.empty()
+        letter_placeholder = st.empty()
+        conf_placeholder = st.empty()
+        st.subheader("누적 텍스트")
+        text_placeholder = st.empty()
+
+    render_status_panel(
+        letter_placeholder,
+        conf_placeholder,
+        jz_label_placeholder,
+        jz_state_placeholder,
+        text_placeholder,
+        None,
+        0.0,
+        "",
+        None,
+        0.0,
+        "-",
+    )
+
+    if not start_clicked:
         return
 
     recognizer = SignRecognizer(
@@ -231,9 +380,6 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
         (width, height),
     )
 
-    progress = st.progress(0, text="동영상 인식 준비 중")
-    preview_placeholder = st.empty()
-    result_placeholder = st.empty()
     last_label: str | None = None
     last_score = 0.0
     last_state = "DETECTING"
@@ -278,6 +424,19 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
                 channels="RGB",
                 caption="처리 중인 프레임",
             )
+            render_status_panel(
+                letter_placeholder,
+                conf_placeholder,
+                jz_label_placeholder,
+                jz_state_placeholder,
+                text_placeholder,
+                last_label,
+                last_score,
+                output_text,
+                last_gesture,
+                last_gesture_score,
+                last_state,
+            )
 
         if total_frames:
             progress.progress(
@@ -292,24 +451,24 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
     cap.release()
     writer.release()
     progress.progress(1.0, text="동영상 인식 완료")
+    preview_placeholder.empty()
 
-    result_placeholder.markdown(
-        f"""
-        **최종 인식 글자:** `{last_label if last_label else "-"}`
-
-        **신뢰도:** `{last_score:.2f}`
-
-        **J/Z 상태:** `{last_state}`
-
-        **J/Z 인식:** `{last_gesture if last_gesture else "-"}`
-
-        **J/Z 신뢰도:** `{last_gesture_score:.2f}`
-        """
+    render_status_panel(
+        letter_placeholder,
+        conf_placeholder,
+        jz_label_placeholder,
+        jz_state_placeholder,
+        text_placeholder,
+        last_label,
+        last_score,
+        output_text,
+        last_gesture,
+        last_gesture_score,
+        last_state,
     )
-    render_output_box(st.empty(), output_text)
 
     with open(output_path, "rb") as video_file:
-        st.video(video_file.read())
+        video_placeholder.video(video_file.read())
 
 
 def build_config() -> RuntimeConfig:
@@ -345,86 +504,11 @@ def main() -> None:
         st.error(str(exc))
         st.stop()
 
-    st.info(
-        "1. 아래 `START`를 눌러 카메라를 시작하세요.\n"
-        "2. 카메라 권한을 허용하세요.\n"
-        "3. 손동작을 웹캠 앞에 보여주세요.\n"
-        "4. 인식 결과는 오른쪽 패널, 누적 텍스트는 카메라 아래에 표시됩니다."
-    )
-
-    # J/Z 인식 결과 상단 표시
-    jz_col1, jz_col2 = st.columns(2)
-    jz_label_ph = jz_col1.empty()
-    jz_conf_ph  = jz_col2.empty()
-
-    camera_col, info_col = st.columns([3, 2])
-    with camera_col:
-        ctx = webrtc_streamer(
-            key="asl-recognizer",
-            mode=WebRtcMode.SENDRECV,
-            media_stream_constraints={"video": True, "audio": False},
-            async_processing=True,
-            video_processor_factory=lambda: VideoProcessor(config),
-        )
-        camera_status_placeholder = st.empty()
-        camera_letter_placeholder = st.empty()
-        camera_conf_placeholder = st.empty()
-
-    with info_col:
-        st.subheader("누적 텍스트")
-        text_box_placeholder = st.empty()
-        reset_clicked = st.button("전체 초기화", use_container_width=True)
-        space_clicked = shortcut_button(
-            "띄어쓰기",
-            "space",
-            key="space_button",
-            use_container_width=True,
-        )
-        delete_clicked = shortcut_button(
-            "한 글자 지우기",
-            "backspace",
-            key="delete_button",
-            use_container_width=True,
-        )
-        st.caption("설정을 바꿨다면 STOP 후 다시 START 하세요.")
-        st.caption("단축키: Space = 띄어쓰기, Backspace = 한 글자 지우기")
-
-    if reset_clicked and ctx.video_processor:
-        ctx.video_processor.reset_text()
-        st.success("출력 텍스트를 초기화했습니다.")
-    if space_clicked and ctx.video_processor:
-        ctx.video_processor.append_space()
-    if delete_clicked and ctx.video_processor:
-        ctx.video_processor.backspace()
-
-    @st.fragment(run_every=0.2)
-    def render_live_status() -> None:
-        if ctx.state.playing and ctx.video_processor:
-            label, score, output_text, gesture, gesture_score, state = ctx.video_processor.get_state()
-            # 상태 표시
-            state_color = {"DETECTING": "🟢", "MOVING": "🟡", "JUDGING": "🔵", "COOLDOWN": "🔴"}
-            jz_label_ph.metric("J/Z 인식", gesture if gesture else "-")
-            jz_conf_ph.progress(
-                int(gesture_score * 100),
-                text=f"상태: {state_color.get(state,'')} {state}",
-            )
-            camera_status_placeholder.success("인식 중")
-            camera_letter_placeholder.metric("현재 인식 글자", label if label else "-")
-            camera_conf_placeholder.progress(
-                int(max(0.0, min(score, 1.0)) * 100),
-                text=f"신뢰도: {score:.2f}" if label else "신뢰도: -",
-            )
-            render_output_box(text_box_placeholder, output_text)
-        else:
-            jz_label_ph.metric("J/Z 인식", "-")
-            jz_conf_ph.progress(0, text="상태: -")
-            camera_status_placeholder.info("카메라 시작 대기 중")
-            camera_letter_placeholder.metric("현재 인식 글자", "-")
-            camera_conf_placeholder.progress(0, text="신뢰도: -")
-            render_output_box(text_box_placeholder, "")
-
-    render_live_status()
-    render_uploaded_video_tool(config)
+    live_tab, upload_tab = st.tabs(["실시간 인식", "동영상 업로드"])
+    with live_tab:
+        render_live_recognition_tab(config)
+    with upload_tab:
+        render_uploaded_video_tool(config)
 
 if __name__ == "__main__":
     main()
