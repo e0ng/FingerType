@@ -23,16 +23,17 @@ try:
 except ImportError:
     _JOBLIB_AVAILABLE = False
 
-_TRACK_LEN   = 64
-_FIXED_LEN   = 30
-_LABELS      = {0: "J", 1: "Z"}
+_TRACK_LEN      = 64
+_FIXED_LEN      = 30
+_LABELS         = {0: "Z", 1: "J"}
+_SPEED_ENTER    = 5     # MOVING 진입 속도 (px/frame)
+_STOP_FRAMES    = 15    # 멈춤 판단 프레임 수
+_TIMEOUT_SEC    = 3.0   # MOVING 타임아웃
+_COOLDOWN_SEC   = 2.0   # COOLDOWN 시간
 
 _DEFAULT_LANDMARKER = "models/hand_landmarker.task"
 _DEFAULT_SVM        = "models/gesture_svm.pkl"
 _DEFAULT_SCALER     = "models/gesture_scaler.pkl"
-
-_SPEED_THRESHOLD = 25   # px/frame — 이 이상이면 MOVING 진입
-_TIMEOUT_SEC     = 1.5  # MOVING 최대 유지 시간
 
 
 class State(enum.Enum):
@@ -42,27 +43,71 @@ class State(enum.Enum):
     COOLDOWN  = "COOLDOWN"
 
 
-def _tip_speed(prev: tuple[int,int] | None, curr: tuple[int,int]) -> float:
+def _dist(a, b):
+    return ((a.x - b.x)**2 + (a.y - b.y)**2) ** 0.5
+
+
+def _is_extended(lms, tip, pip, mcp, ratio=1.05):
+    return _dist(lms[tip], lms[mcp]) > _dist(lms[pip], lms[mcp]) * ratio
+
+
+def _finger_state(lms):
+    """검지만 펴짐 → 'Z', 새끼만 펴짐 → 'J', 그 외 → None"""
+    index  = _is_extended(lms, 8,  6,  5)
+    middle = _is_extended(lms, 12, 10, 9)
+    pinky  = _is_extended(lms, 20, 18, 17)
+
+    # Z: 검지 펴짐 (새끼 상태 무관 — Z 제스처 시 새끼가 살짝 올라올 수 있음)
+    if index:
+        return "Z"
+    # J: 새끼 펴짐 + 검지 안 펴짐
+    if pinky and not index:
+        return "J"
+    return None
+
+
+def _speed(prev, curr):
     if prev is None:
         return 0.0
-    return ((curr[0]-prev[0])**2 + (curr[1]-prev[1])**2) ** 0.5
+    return ((curr[0] - prev[0])**2 + (curr[1] - prev[1])**2) ** 0.5
 
 
-def _preprocess(track_points) -> np.ndarray | None:
-    pts = np.array(list(track_points), dtype=float)
-    if len(pts) < 2:
+def _preprocess(pts):
+    arr = np.array(list(pts), dtype=float)
+    if len(arr) < 2:
         return None
-    t     = np.linspace(0, 1, len(pts))
+    t     = np.linspace(0, 1, len(arr))
     t_new = np.linspace(0, 1, _FIXED_LEN)
-    resampled = np.stack([
-        interp1d(t, pts[:, 0])(t_new),
-        interp1d(t, pts[:, 1])(t_new),
+    res = np.stack([
+        interp1d(t, arr[:, 0])(t_new),
+        interp1d(t, arr[:, 1])(t_new),
     ], axis=1)
-    resampled -= resampled.min(axis=0)
-    max_val = resampled.max()
-    if max_val > 0:
-        resampled /= max_val
-    return resampled.flatten()
+    res -= res.min(axis=0)
+    m = res.max()
+    if m > 0:
+        res /= m
+    return res.flatten()
+
+
+def _rule_judge(pts, mode):
+    """모드 기반 판별 - 검지=Z, 새끼=J로 이미 구분되므로 이동량만 확인"""
+    if len(pts) < 15:
+        return None, 0.0
+
+    # 전체 이동 거리 계산
+    total_dist = sum(
+        ((pts[i][0]-pts[i-1][0])**2 + (pts[i][1]-pts[i-1][1])**2)**0.5
+        for i in range(1, len(pts))
+    )
+
+    # 충분히 움직였으면 모드에 따라 확정
+    if total_dist > 80:
+        if mode == "Z":
+            return "Z", 0.9
+        elif mode == "J":
+            return "J", 0.9
+
+    return None, 0.0
 
 
 class GestureRecognizer:
@@ -72,138 +117,160 @@ class GestureRecognizer:
         scaler_path: str = _DEFAULT_SCALER,
         landmarker_path: str = _DEFAULT_LANDMARKER,
         conf_threshold: float = 0.6,
-        cooldown_sec: float = 2.0,
     ):
         self.conf_threshold = conf_threshold
-        self.cooldown_sec   = cooldown_sec
-
-        self.state: State = State.DETECTING
-        self.track_points: collections.deque[tuple[int,int]] = collections.deque(maxlen=_TRACK_LEN)
-        self._prev_index: tuple[int,int] | None = None
-        self._prev_pinky: tuple[int,int] | None = None
-        self._move_start: float = 0.0
-        self._cooldown_start: float = 0.0
-
-        self._model    = None
-        self._scaler   = None
-        self._landmarker = None
+        self.state          = State.DETECTING
+        self.track          = collections.deque(maxlen=_TRACK_LEN)
+        self._mode          = None   # "J" or "Z"
+        self._prev          = None   # 이전 프레임 손끝 좌표
+        self._stop_cnt      = 0
+        self._move_start    = 0.0
+        self._cool_start    = 0.0
+        self._finger_ready_cnt = 0   # 손가락 펴진 상태 유지 프레임 수
+        self._FINGER_READY  = 4      # 이 프레임 수 이상 유지돼야 궤적 수집 시작
+        self._last_fstate   = None   # 직전 비-None fstate 기억
+        self._model         = None
+        self._scaler        = None
+        self._landmarker    = None
 
         if _JOBLIB_AVAILABLE:
-            svm_file    = Path(svm_path)
-            scaler_file = Path(scaler_path)
-            if svm_file.exists() and scaler_file.exists():
-                self._model  = joblib.load(str(svm_file))
-                self._scaler = joblib.load(str(scaler_file))
+            sp, sc = Path(svm_path), Path(scaler_path)
+            if sp.exists() and sc.exists():
+                self._model  = joblib.load(str(sp))
+                self._scaler = joblib.load(str(sc))
 
         if _MP_AVAILABLE:
-            lm_file = Path(landmarker_path)
-            if lm_file.exists():
-                base_opts = mp_python.BaseOptions(model_asset_path=str(lm_file))
-                options   = mp_vision.HandLandmarkerOptions(
-                    base_options=base_opts, num_hands=1
+            lm = Path(landmarker_path)
+            if lm.exists():
+                opts = mp_vision.HandLandmarkerOptions(
+                    base_options=mp_python.BaseOptions(model_asset_path=str(lm)),
+                    num_hands=1,
                 )
-                self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
+                self._landmarker = mp_vision.HandLandmarker.create_from_options(opts)
 
     @property
-    def is_ready(self) -> bool:
-        return self._model is not None and self._landmarker is not None
+    def current_state(self):
+        return self.state.value
 
-    def predict(self, frame: np.ndarray) -> tuple[np.ndarray, str | None, float]:
-        annotated = frame.copy()
-
+    def predict(self, frame: np.ndarray):
+        out = frame.copy()
         if self._landmarker is None:
-            return annotated, None, 0.0
+            return out, None, 0.0
 
-        h, w     = frame.shape[:2]
-        rgb      = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        detection = self._landmarker.detect(mp_image)
+        h, w  = frame.shape[:2]
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res   = self._landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+        now   = time.time()
 
-        now = time.time()
-
-        # COOLDOWN 체크
+        # ── COOLDOWN ──
         if self.state == State.COOLDOWN:
-            if now - self._cooldown_start >= self.cooldown_sec:
+            if now - self._cool_start >= _COOLDOWN_SEC:
                 self.state = State.DETECTING
-            self._draw_track(annotated)
-            return annotated, None, 0.0
+                self.track.clear()
+                self._prev = None
+            self._draw(out)
+            return out, None, 0.0
 
-        if not detection.hand_landmarks:
-            # 손 없으면 초기화
-            self._prev_index = None
-            self._prev_pinky = None
+        # ── 손 없음 ──
+        if not res.hand_landmarks:
+            self._prev = None
+            self._finger_ready_cnt = 0
             if self.state == State.MOVING:
                 self.state = State.JUDGING
-            elif self.state == State.DETECTING:
-                self.track_points.clear()
+            else:
+                self.track.clear()
+            self._stop_cnt = 0
+
         else:
-            lms = detection.hand_landmarks[0]
+            lms  = res.hand_landmarks[0]
+            fstate = _finger_state(lms)
 
-            index_pos = (int(lms[8].x * w),  int(lms[8].y * h))
-            pinky_pos = (int(lms[20].x * w), int(lms[20].y * h))
-
-            # 각 손가락 독립적으로 속도 계산
-            index_speed = _tip_speed(self._prev_index, index_pos)
-            pinky_speed = _tip_speed(self._prev_pinky, pinky_pos)
-            speed = max(index_speed, pinky_speed)
+            # 추적 손가락 좌표
+            # DETECTING: 마지막으로 감지된 손가락 기준 유지 (fstate None일 때 튀는 것 방지)
+            # MOVING 이후: self._mode 고정
+            if self.state == State.DETECTING:
+                if fstate is not None:
+                    self._last_fstate = fstate
+                tip_idx = 8 if self._last_fstate == "Z" else 20
+            else:
+                tip_idx = 8 if self._mode == "Z" else 20
+            tip = lms[tip_idx]
+            pos = (int(tip.x * w), int(tip.y * h))
+            spd = _speed(self._prev, pos)
 
             if self.state == State.DETECTING:
-                # 첫 프레임(prev 없음)은 속도 0이므로 MOVING 진입 안 함
-                if self._prev_index is not None and speed >= _SPEED_THRESHOLD:
-                    self.track_points.clear()
-                    self.state = State.MOVING
+                if fstate is not None:
+                    self._finger_ready_cnt += 1
+                else:
+                    self._finger_ready_cnt = 0
+
+                # 손가락 펴진 상태가 충분히 유지된 후 움직임 감지 시 MOVING 진입
+                if (fstate is not None
+                        and self._prev is not None
+                        and self._finger_ready_cnt >= self._FINGER_READY
+                        and spd >= _SPEED_ENTER):
+                    self._mode       = fstate
+                    self._stop_cnt   = 0
                     self._move_start = now
-                    tip_pos = index_pos if index_speed >= pinky_speed else pinky_pos
-                    self.track_points.append(tip_pos)
-                self._prev_index = index_pos
-                self._prev_pinky = pinky_pos
+                    self.track.clear()
+                    self.track.append(pos)
+                    self.state = State.MOVING
+                    self._finger_ready_cnt = 0
+                self._prev = pos
 
             elif self.state == State.MOVING:
-                tip_pos = index_pos if index_speed >= pinky_speed else pinky_pos
-                self.track_points.append(tip_pos)
-                self._prev_index = index_pos
-                self._prev_pinky = pinky_pos
+                # MOVING 중엔 손이 감지되는 한 궤적 수집 (fstate 조건 제거)
+                self.track.append(pos)
+                self._prev = pos
 
-                # 멈추거나 타임아웃 → JUDGING
-                if speed < _SPEED_THRESHOLD or (now - self._move_start) >= _TIMEOUT_SEC:
+                if spd < 8:
+                    self._stop_cnt += 1
+                else:
+                    self._stop_cnt = 0
+
+                if self._stop_cnt >= _STOP_FRAMES or (now - self._move_start) >= _TIMEOUT_SEC:
                     self.state = State.JUDGING
 
-        # JUDGING: 궤적으로 J/Z 판별
+        # ── JUDGING ──
         if self.state == State.JUDGING:
-            result, prob = self._judge()
-            self.track_points.clear()
-            self._prev_tip = None
-            if result is not None:
-                self._cooldown_start = now
+            label, prob = self._judge()
+            self.track.clear()
+            self._prev     = None
+            self._stop_cnt = 0
+            if label:
+                self._cool_start = now
                 self.state = State.COOLDOWN
-                self._draw_track(annotated)
-                return annotated, result, prob
+                self._draw(out)
+                return out, label, prob
             else:
                 self.state = State.DETECTING
-                self._draw_track(annotated)
-                return annotated, None, 0.0
 
-        self._draw_track(annotated)
-        return annotated, None, 0.0
+        self._draw(out)
+        return out, None, 0.0
 
-    def _judge(self) -> tuple[str | None, float]:
-        if self._model is None or len(self.track_points) < 15:
+    def _judge(self):
+        pts = list(self.track)
+        if len(pts) < 15:
             return None, 0.0
-        feat = _preprocess(self.track_points)
-        if feat is None:
-            return None, 0.0
-        x    = self._scaler.transform([feat])
-        pred = int(self._model.predict(x)[0])
-        prob = float(self._model.predict_proba(x)[0].max())
-        if prob < self.conf_threshold:
-            return None, 0.0
-        return _LABELS[pred], prob
 
-    def _draw_track(self, frame: np.ndarray) -> None:
-        pts = list(self.track_points)
+        # 규칙 기반 먼저
+        label, prob = _rule_judge(pts, self._mode)
+        if label:
+            return label, prob
+
+        # SVM 시도
+        if self._model is not None:
+            feat = _preprocess(self.track)
+            if feat is not None:
+                x    = self._scaler.transform([feat])
+                pred = int(self._model.predict(x)[0])
+                prob = float(self._model.predict_proba(x)[0].max())
+                if prob >= self.conf_threshold:
+                    return _LABELS[pred], prob
+
+        return None, 0.0
+
+    def _draw(self, frame):
+        pts = list(self.track)
         for i in range(1, len(pts)):
             cv2.line(frame, pts[i-1], pts[i], (255, 0, 0), 2)
-
-    @property
-    def current_state(self) -> str:
-        return self.state.value

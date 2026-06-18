@@ -42,6 +42,8 @@ def run_recognition_step(
             draw_conf=False,
         )
         annotated = yolo_annotated
+        if label in ("J", "Z"):
+            label, score = None, 0.0
         commit = accumulator.update(label)
     else:
         label, score = None, 0.0
