@@ -22,7 +22,6 @@ with MediaPipe hand landmarks and trajectory-based logic.
 ├── recognizer.py           # YOLO static letter inference
 ├── gesture_recognizer.py   # J/Z dynamic gesture state machine
 ├── postprocess.py          # Debounce and cooldown logic
-├── webcam_infer.py         # Optional direct webcam inference script
 ├── requirements.txt        # Runtime dependencies
 └── models/                 # Local model files, not all weights are committed
 ```
@@ -43,37 +42,26 @@ the same Python environment that runs Streamlit.
 
 ## Model Files
 
-Large or frequently updated model weights are not committed to this repository.
-Download the final YOLO model and dynamic gesture classifier files from the
-shared Google Drive folder, then place them in the `models` directory.
+Large or frequently updated YOLO weights are not committed to this repository.
+Download the final YOLO model from the shared Google Drive folder, then place it
+in the `models` directory.
 
 ```text
 models/asl6_yolov8n.pt
-models/gesture_scaler.pkl
-models/gesture_svm.pkl
 ```
 
 Model file roles:
 
 | File | Role | Git status |
 |---|---|---|
-| `models/asl_yolov8n.pt` | Baseline or reference model | Committed |
 | `models/asl6_yolov8n.pt` | Final service model | Download separately |
-| `models/gesture_scaler.pkl` | Feature scaler for J/Z trajectory classification | Download separately |
-| `models/gesture_svm.pkl` | SVM classifier for J/Z trajectory classification | Download separately |
-| `models/hand_landmarker.task` | MediaPipe hand landmark model for J/Z | Download separately if missing |
+| `models/gesture_scaler.pkl` | Feature scaler for J/Z trajectory classification | Committed |
+| `models/gesture_svm.pkl` | SVM classifier for J/Z trajectory classification | Committed |
+| `models/hand_landmarker.task` | MediaPipe hand landmark model for J/Z | Committed |
 
 Model download folder:
 
 https://drive.google.com/drive/folders/1IUOq2dYEz1PIXTiPFRucBRym74Ry0ffm?usp=share_link
-
-MediaPipe hand landmarker download:
-
-```bash
-mkdir -p models
-curl -L -o models/hand_landmarker.task \
-  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
-```
 
 After downloading, the model directory should include:
 
@@ -131,7 +119,7 @@ validation performance close to the baseline.
 
 | Version | Model file | Main change | Notes |
 |---|---|---|---|
-| v1 | `models/asl_yolov8n.pt` | Initial baseline | Reference model |
+| v1 | `models/asl_yolov8n.pt` | Initial baseline | Reference model, not committed |
 | v2 | `models/asl2_yolov8n.pt` | Roboflow augmentation for confused letters | Improved some classes but introduced new confusion |
 | v3 | `models/asl3_yolov8n.pt` | Added custom right-hand images | High validation mAP but unstable webcam behavior |
 | v4 | `models/asl4_yolov8n.pt` | Reduced unstable custom samples | More conservative dataset version |
@@ -145,23 +133,10 @@ validation performance close to the baseline.
 | 권예원 | Static YOLO model retraining, confusion analysis, Streamlit UI, uploaded video recognition |
 | 한정현 | Dynamic J/Z gesture recognition, MediaPipe landmark processing, trajectory classification |
 
-## Optional Direct Webcam Test
-
-```bash
-python webcam_infer.py --model models/asl6_yolov8n.pt
-```
-
-Controls:
-
-- `q`: Quit
-- `c`: Clear accumulated text
-
 ## Reproducibility Checklist
 
 - Install dependencies with `pip install -r requirements.txt`.
-- Download `models/asl6_yolov8n.pt`, `models/gesture_scaler.pkl`, and
-  `models/gesture_svm.pkl` to the expected paths.
-- Download `models/hand_landmarker.task` if dynamic J/Z recognition is needed.
+- Download `models/asl6_yolov8n.pt` to the expected path.
 - Run `streamlit run app.py` from the project root.
 - Confirm there are no local absolute paths such as `C:\Users\...` or
   `/Users/...` in tracked source files.

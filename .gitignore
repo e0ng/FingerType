@@ -8,8 +8,6 @@ runs/
 
 # Local model weights
 *.pt
-!models/.gitkeep
-!models/asl_yolov8n.pt
 
 # Streamlit and notebook/runtime leftovers
 .streamlit/
