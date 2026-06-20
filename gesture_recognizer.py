@@ -54,13 +54,11 @@ def _is_extended(lms, tip, pip, mcp, ratio=1.05):
 def _finger_state(lms):
     """검지만 펴짐 → 'Z', 새끼만 펴짐 → 'J', 그 외 → None"""
     index  = _is_extended(lms, 8,  6,  5)
-    middle = _is_extended(lms, 12, 10, 9)
     pinky  = _is_extended(lms, 20, 18, 17)
 
     # Z: 검지 펴짐 (새끼 상태 무관 — Z 제스처 시 새끼가 살짝 올라올 수 있음)
     if index:
         return "Z"
-    # J: 새끼 펴짐 + 검지 안 펴짐
     if pinky and not index:
         return "J"
     return None
@@ -94,13 +92,11 @@ def _rule_judge(pts, mode):
     if len(pts) < 15:
         return None, 0.0
 
-    # 전체 이동 거리 계산
     total_dist = sum(
         ((pts[i][0]-pts[i-1][0])**2 + (pts[i][1]-pts[i-1][1])**2)**0.5
         for i in range(1, len(pts))
     )
 
-    # 충분히 움직였으면 모드에 따라 확정
     if total_dist > 80:
         if mode == "Z":
             return "Z", 0.9
@@ -204,11 +200,8 @@ class GestureRecognizer:
             if self.state == State.DETECTING:
                 if fstate is not None:
                     if spd < self._SPEED_ENTER:
-                        # 안정적으로 펴진 상태일 때만 카운트
                         self._finger_ready_cnt += 1
-                    # 빠르게 움직이는 중엔 카운트 유지 (리셋 안 함)
                 else:
-                    # 손가락 사라지면 리셋
                     self._finger_ready_cnt = 0
 
                 # 손가락 펴진 상태가 충분히 유지된 후 움직임 감지 시 MOVING 진입
@@ -260,18 +253,15 @@ class GestureRecognizer:
         if len(pts) < 15:
             return None, 0.0
 
-        # 최소 이동폭 체크 — 너무 작은 움직임은 제스처로 인정 안 함
         arr = np.array(pts)
         span = (arr.max(axis=0) - arr.min(axis=0)).max()
         if span < 60:
             return None, 0.0
 
-        # 규칙 기반 먼저
         label, prob = _rule_judge(pts, self._mode)
         if label:
             return label, prob
 
-        # SVM 시도
         if self._model is not None:
             feat = _preprocess(self.track)
             if feat is not None:
