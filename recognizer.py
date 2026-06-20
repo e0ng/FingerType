@@ -15,7 +15,10 @@ class SignRecognizer:
         model_file = Path(model_path)
         if not model_file.exists():
             raise FileNotFoundError(
-                f"Model not found: {model_file}. Put your trained weight file in this path."
+                "Model not found: "
+                f"{model_file}. Download the final YOLO weight file and save it "
+                "as models/asl6_yolov8n.pt, or update the model path in the "
+                "Streamlit sidebar. See README.md for model setup details."
             )
 
         self.model = YOLO(str(model_file))
