@@ -4,6 +4,7 @@ FingerType은 실시간 웹캠 또는 업로드된 동영상에서 ASL 알파벳
 누적 텍스트로 변환하는 Streamlit 웹 앱입니다. 정적 알파벳은 YOLOv8n 객체
 탐지 모델로 처리하고, 동적 제스처인 `J`와 `Z`는 MediaPipe 손 랜드마크와
 궤적 기반 로직을 이용해 판별합니다.
+<img width="1710" height="1107" alt="스크린샷 2026-06-22 오전 6 30 31" src="https://github.com/user-attachments/assets/2d832f1b-d378-4143-a439-9eecb070694a" />
 
 ## 주요 기능
 
