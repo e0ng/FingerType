@@ -4,7 +4,7 @@ FingerType은 실시간 웹캠 또는 업로드된 동영상에서 ASL 알파벳
 누적 텍스트로 변환하는 Streamlit 웹 앱입니다. 정적 알파벳은 YOLOv8n 객체
 탐지 모델로 처리하고, 동적 제스처인 `J`와 `Z`는 MediaPipe 손 랜드마크와
 궤적 기반 로직을 이용해 판별합니다.
-<img width="1710" height="1107" alt="스크린샷 2026-06-22 오전 6 30 31" src="https://github.com/user-attachments/assets/2d832f1b-d378-4143-a439-9eecb070694a" />
+<img width="1710" height="1107" alt="스크린샷 2026-06-22 오전 6 31 41" src="https://github.com/user-attachments/assets/5184cbec-179e-4d88-986a-54f59e2e7a3b" />
 
 ## 주요 기능
 
@@ -144,6 +144,15 @@ Colab Secrets에 `ROBOFLOW_API_KEY`로 등록해 사용합니다.
 pip install roboflow
 ```
 
+## J/Z SVM 학습 파이프라인
+
+학습 코드: [Google Colab 노트북](https://colab.research.google.com/drive/1WFwr-eSvU4-x1fiLwyzjHWn_N2RgDsQs?usp=sharing)
+
+1. J(새끼손가락)와 Z(검지) 동작을 각각 MOV 영상으로 촬영합니다 (J 6개, Z 9개 영상).
+2. 촬영 영상에서 MediaPipe HandLandmarker로 프레임별 손 랜드마크를 추출하고, 주먹 동작을 샘플 경계로 활용해 궤적을 자동 분리합니다.
+3. 추출된 궤적을 30포인트 보간 → 중심 정규화 → 60차원 벡터로 전처리합니다.
+4. SVM(RBF 커널, StandardScaler)으로 학습하고 `models/gesture_svm.pkl` / `models/gesture_scaler.pkl`로 저장합니다.
+5. 5-Fold CV 정확도 96.3% ± 3.0%, 테스트 정확도 95.9% (49개 샘플 중 47개 정답)로 검증합니다.
 
 ## 팀원 역할
 
