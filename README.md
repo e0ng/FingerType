@@ -3,7 +3,7 @@
 FingerType은 실시간 웹캠 또는 업로드된 동영상에서 ASL 알파벳을 인식하고
 누적 텍스트로 변환하는 Streamlit 웹 앱입니다. 정적 알파벳은 YOLOv8n 객체
 탐지 모델로 처리하고, 동적 제스처인 `J`와 `Z`는 MediaPipe 손 랜드마크와
-궤적 기반 로직을 이용해 판별합니다.
+궤적 기반 SVM 분류기를 이용해 판별합니다.
 <img width="1710" height="1107" alt="스크린샷 2026-06-22 오전 6 31 41" src="https://github.com/user-attachments/assets/5184cbec-179e-4d88-986a-54f59e2e7a3b" />
 
 ## 주요 기능
@@ -21,7 +21,7 @@ FingerType은 실시간 웹캠 또는 업로드된 동영상에서 ASL 알파벳
 .
 ├── app.py                  # Streamlit UI와 입력 흐름
 ├── recognizer.py           # YOLO 정적 알파벳 추론
-├── gesture_recognizer.py   # J/Z 동적 제스처 상태 머신
+├── gesture_recognizer.py   # J/Z 동적 제스처 상태 머신 및 SVM 분류
 ├── postprocess.py          # debounce와 cooldown 후처리
 ├── requirements.txt        # 실행 의존성
 └── models/                 # 로컬 모델 파일 디렉터리
