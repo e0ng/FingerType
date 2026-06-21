@@ -132,9 +132,21 @@ models/asl6_yolov8n.pt
 6. YOLOv8n 모델을 학습하고 mAP50, mAP50-95, latency, Confusion Matrix를 비교합니다.
 7. 최종 서비스 모델로 `asl6_yolov8n.pt`를 사용합니다.
 
+## 학습 스크립트
+
+Colab에서 최종 정적 ASL 모델을 학습할 때 사용한 흐름은
+`training/asl_train.ipynb`에 정리되어 있습니다. 
+Roboflow API key는 코드에 직접 넣지 않고 
+Colab Secrets에 `ROBOFLOW_API_KEY`로 등록해 사용합니다.
+
+```bash
+pip install roboflow
+```
+
+
 ## 팀원 역할
 
 | 팀원 | 주요 담당 |
 |---|---|
-| 권예원 | 정적 YOLO 모델 재학습, Confusion Matrix 분석, Streamlit UI, 동영상 업로드 인식 |
-| 한정현 | 동적 J/Z 제스처 인식, MediaPipe 랜드마크 처리, 궤적 분류 |
+| 권예원 | 정적 YOLO 모델 재학습, 직접 촬영 데이터 보강, Streamlit UI |
+| 한정현 | 동적 J/Z 제스처 인식, MediaPipe 랜드마크 처리, 상태 머신 및 궤적 분류 |
