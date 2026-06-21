@@ -25,7 +25,7 @@ except ImportError:
 
 _TRACK_LEN      = 64
 _FIXED_LEN      = 30
-_LABELS         = {0: "Z", 1: "J"}
+_LABELS         = {0: "J", 1: "Z"}
 _SPEED_ENTER    = 5     # MOVING 진입 속도 (px/frame)
 _STOP_FRAMES    = 15    # 멈춤 판단 프레임 수
 _TIMEOUT_SEC    = 3.0   # MOVING 타임아웃
@@ -52,14 +52,27 @@ def _is_extended(lms, tip, pip, mcp, ratio=1.05):
 
 
 def _finger_state(lms):
-    """검지만 펴짐 → 'Z', 새끼만 펴짐 → 'J', 그 외 → None"""
-    index  = _is_extended(lms, 8,  6,  5)
-    pinky  = _is_extended(lms, 20, 18, 17)
+    """검지 vs 새끼 중 더 많이 펴진 손가락 기준으로 J/Z 판별"""
+    index_ext = _is_extended(lms, 8,  6,  5)
+    pinky_ext = _is_extended(lms, 20, 18, 17)
 
-    # Z: 검지 펴짐 (새끼 상태 무관 — Z 제스처 시 새끼가 살짝 올라올 수 있음)
-    if index:
+    if not index_ext and not pinky_ext:
+        return None
+
+    # 둘 다 펴진 경우: MCP 기준 상대 거리로 더 dominant한 손가락 선택
+    index_len = _dist(lms[8], lms[5])
+    pinky_len = _dist(lms[20], lms[17])
+
+    if index_ext and pinky_ext:
+        if index_len > pinky_len * 1.2:
+            return "Z"
+        elif pinky_len > index_len * 1.2:
+            return "J"
+        return None
+
+    if index_ext:
         return "Z"
-    if pinky and not index:
+    if pinky_ext:
         return "J"
     return None
 
@@ -86,24 +99,6 @@ def _preprocess(pts):
         res /= m
     return res.flatten()
 
-
-def _rule_judge(pts, mode):
-    """모드 기반 판별 - 검지=Z, 새끼=J로 이미 구분되므로 이동량만 확인"""
-    if len(pts) < 15:
-        return None, 0.0
-
-    total_dist = sum(
-        ((pts[i][0]-pts[i-1][0])**2 + (pts[i][1]-pts[i-1][1])**2)**0.5
-        for i in range(1, len(pts))
-    )
-
-    if total_dist > 80:
-        if mode == "Z":
-            return "Z", 0.9
-        elif mode == "J":
-            return "J", 0.9
-
-    return None, 0.0
 
 
 class GestureRecognizer:
@@ -255,12 +250,8 @@ class GestureRecognizer:
 
         arr = np.array(pts)
         span = (arr.max(axis=0) - arr.min(axis=0)).max()
-        if span < 60:
+        if span < 120:
             return None, 0.0
-
-        label, prob = _rule_judge(pts, self._mode)
-        if label:
-            return label, prob
 
         if self._model is not None:
             feat = _preprocess(self.track)

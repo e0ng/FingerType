@@ -309,14 +309,16 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
             help="웹캠 화면과 같은 방향으로 맞춰 분석합니다.",
         )
 
-    if uploaded_file is None:
-        return
-
     video_col, info_col = st.columns([3, 2])
     with video_col:
         video_placeholder = st.empty()
-        video_placeholder.video(uploaded_file)
-        start_clicked = st.button("업로드 영상 인식 시작", use_container_width=True)
+        if uploaded_file is not None:
+            video_placeholder.video(uploaded_file)
+        start_clicked = st.button(
+            "업로드 영상 인식 시작",
+            use_container_width=True,
+            disabled=uploaded_file is None,
+        )
         progress = st.progress(0, text="동영상 인식 대기 중")
         preview_placeholder = st.empty()
 
@@ -329,28 +331,35 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
         st.subheader("누적 텍스트")
         text_placeholder = st.empty()
 
+    # 이전 결과 유지
+    prev = st.session_state.get("upload_result")
+    if prev and not start_clicked:
+        video_placeholder.video(prev["video_bytes"])
+        render_status_panel(
+            letter_placeholder, conf_placeholder,
+            jz_label_placeholder, jz_state_placeholder, text_placeholder,
+            prev["label"], prev["score"], prev["text"],
+            prev["gesture"], prev["gesture_score"], prev["state"],
+        )
+        return
+
     render_status_panel(
-        letter_placeholder,
-        conf_placeholder,
-        jz_label_placeholder,
-        jz_state_placeholder,
-        text_placeholder,
-        None,
-        0.0,
-        "",
-        None,
-        0.0,
-        "-",
+        letter_placeholder, conf_placeholder,
+        jz_label_placeholder, jz_state_placeholder, text_placeholder,
+        None, 0.0, "", None, 0.0, "-",
     )
 
-    if not start_clicked:
+    if uploaded_file is None or not start_clicked:
         return
 
     recognizer = SignRecognizer(
         model_path=config.model_path,
         conf_threshold=config.conf_threshold,
     )
-    gesture_recognizer = GestureRecognizer()
+    gesture_recognizer = GestureRecognizer(
+        finger_ready_frames=config.finger_ready_frames,
+        speed_enter=config.speed_enter,
+    )
     accumulator = DebounceAccumulator(
         min_stable_frames=config.stable_frames,
         cooldown_frames=config.cooldown_frames,
@@ -468,7 +477,18 @@ def render_uploaded_video_tool(config: RuntimeConfig) -> None:
     )
 
     with open(output_path, "rb") as video_file:
-        video_placeholder.video(video_file.read())
+        video_bytes = video_file.read()
+
+    st.session_state["upload_result"] = {
+        "video_bytes": video_bytes,
+        "label": last_label,
+        "score": last_score,
+        "text": output_text,
+        "gesture": last_gesture,
+        "gesture_score": last_gesture_score,
+        "state": last_state,
+    }
+    video_placeholder.video(video_bytes)
 
 
 def build_config() -> RuntimeConfig:
