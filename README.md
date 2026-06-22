@@ -29,7 +29,7 @@ FingerType은 실시간 웹캠 또는 업로드된 동영상에서 ASL 알파벳
 
 ## 실행 환경
 
-프로젝트는 Python 3와 `requirements.txt`에 정리된 패키지를 기준으로
+프로젝트는 Python 3.10 이상과 `requirements.txt`에 정리된 패키지를 기준으로
 실행합니다.
 
 프로젝트 루트에서 의존성을 설치합니다.
